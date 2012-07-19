@@ -10,7 +10,7 @@ project(audit_test)
 INCLUDE_DIRECTORIES(
 ${CMAKE_SOURCE_DIR}
 ${CMAKE_SOURCE_DIR}/include
-${CMAKE_SOURCE_DIR}/plugin/audit-2.2/include
+${CMAKE_SOURCE_DIR}/plugin/mysql-audit/include
 )
 
 SET(BIN_DIR ../bin)
