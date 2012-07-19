@@ -1,0 +1,44 @@
+MySQL AUDIT 2.2
+
+This is a plugin of MySQL Server, the plugin based on MySQL Server audit plugin
+interface, aimed to audit the mysql database operations.  If you have the more 
+efficient method to audit the mysql database, thanks for your sharing with the 
+developer named heng wang. It's pleasure for you to contact me king_wangheng@163.com. 
+Welcome to join me to develop the more common and effective audit plugin in order
+to service more people. 
+
+
+Copyright (c) 2012, Heng.Wang. All rights reserved.
+
+You can get the source from github or sourceforge, the address is:
+
+or
+
+
+
+The audit plugin relies on MySQL Server 5.5 or Percona Server 5.5. When I develop 
+the audit plugin, based on the MySQL Server 5.5.20, and test on MySQL Server 5.5.20,
+Percona Server 5.5.20, MySQL Server 5.5.15, Percona Server 5.5.15. Because of the 
+audit interface changed from MySQL Server 5.5.16, then test on 5.5.15 is needed.
+
+1. Compile the audit plugin
+1.1 If you get the audit plugin source from sourceforge, decompress the tar package.
+example:  tar -xvzf mysql-audit-2.2.tar.gz
+1.2 Move the audit plugin source into the directory "plugin/" of MySQL Server. 
+example:  mv mysql-audit/ ${MYSQL_SOURCE_HOME}/plugin
+1.3 Compile and install the MySQL Server in usual.
+
+2. Change the granularity of the audit based on the application.
+The location of configure file : ${CMAKE_INSTALL_PREFIX}/lib/plugin/audit.cnf,
+default audit nothing. 
+
+3. Start the MySQL Server in usual.
+
+4. Install the audit plugin.
+Login the MySQL Server with mysql client, and execute the sql statement:
+mysql> install plugin audit soname 'audit.so';
+
+5. Uninstall the audit plugin.
+Login the MySQL Server with mysql client, and execute the sql statement:
+mysql> uninstall plugin audit;
+
