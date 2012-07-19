@@ -11,7 +11,7 @@ to service more people.
 Copyright (c) 2012, Heng.Wang. All rights reserved.
 
 You can get the source from github or sourceforge, the address is:
-
+git clone https://github.com/HengWang/mysql-audit.git mysql-audit
 or
 
 
