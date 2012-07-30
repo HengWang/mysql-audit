@@ -122,6 +122,10 @@ extern LEX_STRING AUDIT_ERROR_NAME ;
 #define KEY_BY "by"
 #define KEY_FROM "from"
 
+#define ALL_USERS KEY_ALL
+#define ALL_DBS      KEY_ALL
+#define ALL_TABLES KEY_ALL "." KEY_ALL
+
 #define IGNORE_CMD    "/*!"
 #define EMPTY_KEY " "
 #define QUERY_KEY "Query"
@@ -144,9 +148,6 @@ extern LEX_STRING AUDIT_ERROR_NAME ;
 extern ulonglong opt_audit_file_size;
 extern ulonglong opt_audit_ops;
 extern uint opt_audit_class;
-extern char *opt_audit_users;
-extern char *opt_audit_dbs;
-extern char *opt_audit_tables;
 extern char *opt_audit_dir;
 extern char* opt_audit_file;
 extern char default_audit_dir[FN_REFLEN];
@@ -158,8 +159,11 @@ extern DYNAMIC_ARRAY* audit_tables;
 typedef int (*cb_init_config_vars)(char* key, char* value,char* group);
 extern char* prepare_general_ops(struct mysql_event_general *, char*  );
 extern char* prepare_connect_ops(struct mysql_event_connection *, char* );
+extern char* databases_to_string(MYSQL_THD, char*);
 extern char*  erase_password(MYSQL_THD, char* ,const char* );
-extern my_bool check_object(DYNAMIC_ARRAY* , const char* );
+extern my_bool check_users(MYSQL_THD);
+extern my_bool check_databases(MYSQL_THD);
+extern my_bool check_tables(MYSQL_THD);
 #endif //_AUDIT_H
 
 

@@ -17,6 +17,14 @@ audit_users = *
 # The audit tables, split the multiple tables with ','.
 # The tables option format like db.table is valid.
 #audit_tables = *
+# The ignore users, split the multiple users with ','.
+#ignore_users = *
+# The ignore databases, split the multiple databases with ',' .
+#ignore_dbs= *
+# The ignore tables, split the multiple tables with ','.
+# The tables option format like db.table is valid.
+#ignore_tables = *
+
 # The audit class FILE TABLE
 audit_class = FILE
 

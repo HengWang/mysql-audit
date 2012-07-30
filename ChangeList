@@ -1,0 +1,49 @@
+                          ChangeList
+MySQL audit plugin change list.
+						  
+2012/7/29 
+1. Modify the function of:
+       char*  erase_password(MYSQL_THD thd,char* op_str,const char* query) 
+   In line 491 of audit.cc. 
+   1) Process the "set password ..." seperated. (audit.cc: 519~531)
+   2) Check the current query table whether is mysql.user. (audit.cc: 545~551)   
+2. Add the ignore users, ignore dbs, ignore tables procedures.
+   1) Add the global variables in line (164~166) of audit.cc 
+   2) Add the dynamic array in line (147~149)  of audit.cc
+   3) Modify the enum_audit_variables type, add VAR_IGNORE_USERS,VAR_IGNORE_DBS,
+      VAR_IGNORE_TABLES enum type. ( audit.cc: 62)
+   4) Modify the array of default_options, add "ignore_users","ignore_dbs",
+      "ignore_tables" options. (audit.cc: 77)
+   5) Modify the function of:
+        static int audit_plugin_init(void *arg __attribute__((unused)))
+      In line 1409 of audit.cc. (1487~1528)
+   6) Modify the function of:
+        static int audit_plugin_deinit(void *arg __attribute__((unused)))
+	  In line 1555 of audit.cc. (1593~1619)
+3. Modify the function of:
+        static my_bool check_object(DYNAMIC_ARRAY* array, const char* object)
+   In line 1210 of audit.cc. Modify the function to static.
+   1) Delete the declaration of check_object in audit.h.
+   2) Modify the processes call check_object function.(audit_file.cc:245,264 
+      audit_table.cc:370,388 )
+4. Add the function of:
+        my_bool check_users(MYSQL_THD thd)
+   In line 1247 of audit.cc.
+5. Add the function of:
+        my_bool check_databases(MYSQL_THD thd)
+   In line 1276 of audit.cc.
+6. Add the function of:
+        my_bool check_tables(MYSQL_THD thd)
+   In line 1314 of audit.cc.
+7. Add the declaration of check_users, check_databases, check_tables. in audit.h.   
+8. Add the processes of check_users, check_databases, check_tables.
+   1) Add the function call in line 245,264 of audit_file.cc
+   2) Add the function call in line 370,388 of audit_table.cc
+9. Add the function of:
+        char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
+   In line 1192 of audit.cc
+   1) Add the declaration of databases_to_string.
+10. Modify the audit output format.
+   1) Add the dbs of current query used in line 87 of audit_file.cc.
+   2) Add the dbs of current query used in line 198 of audit_table.cc.
+   3) Add the column of dbs in audit.sql script .

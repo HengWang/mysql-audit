@@ -13,8 +13,7 @@ Copyright (c) 2012, Heng.Wang. All rights reserved.
 You can get the source from github or sourceforge, the address is:
 git clone https://github.com/HengWang/mysql-audit.git mysql-audit
 or
-
-
+https://sourceforge.net/projects/mysql-audit/
 
 The audit plugin relies on MySQL Server 5.5 or Percona Server 5.5. When I develop 
 the audit plugin, based on the MySQL Server 5.5.20, and test on MySQL Server 5.5.20,

@@ -47,19 +47,20 @@ DESCRIPTION
 If the current operation is general, audit the operation. 
 */
 static int audit_info(MYSQL_THD thd,
-            my_time_t audit_time,
-            char* command, 
-            int status, 
-            unsigned long thread_id, 
-            char* user,
-            const char* external_user,
-            const char* proxy_user,
-            char* host, 
-            char* ip, 
-            const char* query, 
-            const char* charset, 
-            my_time_t event_time,  
-            unsigned long long  rows)
+                      my_time_t audit_time,
+                      char* command, 
+                      int status, 
+                      unsigned long thread_id, 
+                      char* user,
+                      const char* external_user,
+                      const char* proxy_user,
+                      char* host, 
+                      char* ip, 
+                      char* dbs,
+                      const char* query, 
+                      const char* charset, 
+                      my_time_t event_time,  
+                      unsigned long long  rows)
 {
   DBUG_ENTER("audit_info");  
 
@@ -116,32 +117,34 @@ static int audit_info(MYSQL_THD thd,
   }else
     table->field[8]->set_default();   
 
-  if (query)
+  if(dbs)
   {
-    char* p = erase_password(thd,command,query);
-    if (table->field[9]->store(p,strlen(p),thd->variables.character_set_client))
-    {
-      free(p);
+    if(table->field[9]->store(dbs,strlen(charset),thd->variables.character_set_client))
       DBUG_RETURN(1);
-    }
-    free(p);
   }else
     table->field[9]->set_default();
 
-  if(charset)
+  if (query)
   {
-    if(table->field[10]->store(charset,strlen(charset),thd->variables.character_set_client))
-      DBUG_RETURN(1);
+    if (table->field[10]->store(query,strlen(query),thd->variables.character_set_client))
+       DBUG_RETURN(1);
   }else
     table->field[10]->set_default();
 
-  DBUG_ASSERT(table->field[11]->type() == MYSQL_TYPE_TIMESTAMP);
-  if (event_time)
-    ((Field_timestamp*) table->field[11])->store_timestamp(event_time);
-  else
+  if(charset)
+  {
+    if(table->field[11]->store(charset,strlen(charset),thd->variables.character_set_client))
+      DBUG_RETURN(1);
+  }else
     table->field[11]->set_default();
 
-  if(table->field[12]->store(rows, TRUE))
+  DBUG_ASSERT(table->field[12]->type() == MYSQL_TYPE_TIMESTAMP);
+  if (event_time)
+    ((Field_timestamp*) table->field[12])->store_timestamp(event_time);
+  else
+    table->field[12]->set_default();
+
+  if(table->field[13]->store(rows, TRUE))
     DBUG_RETURN(1);
 
   table->field[0]->set_notnull();
@@ -157,7 +160,7 @@ static int audit_info(MYSQL_THD thd,
   table->field[10]->set_notnull();
   table->field[11]->set_notnull();
   table->field[12]->set_notnull();
-
+  table->field[13]->set_notnull();
 
   if (table->file->ha_write_row(table->record[0]))
     DBUG_RETURN(1);
@@ -179,6 +182,8 @@ If the current operation is general, audit the operation.
 static void audit_general(MYSQL_THD thd,mysql_event_general* event, char* op_str)
 {
   time_t t;
+  char* query;
+  char dbs_buf[BUF_LEN] = {0};
   DBUG_ENTER("audit_general");  
   if(audit_info(thd,
     (my_time_t)time(&t),
@@ -190,11 +195,13 @@ static void audit_general(MYSQL_THD thd,mysql_event_general* event, char* op_str
     (const char*) 0,
     thd->main_security_ctx.host,
     thd->main_security_ctx.ip,
-    event->general_query,
+    databases_to_string(thd,dbs_buf),
+    (query = erase_password(thd,op_str,event->general_query)),
     event->general_charset->name,
     (my_time_t)event->general_time,
     event->general_rows))
     DBUG_PRINT("error",("Audit the general operations failed."));
+  free(query);
   DBUG_VOID_RETURN;
 }
 /*
@@ -222,6 +229,7 @@ static void audit_connect(MYSQL_THD thd,mysql_event_connection* event, char* op_
     event->proxy_user,
     thd->main_security_ctx.host,
     thd->main_security_ctx.ip,
+    (char*)0,
     (const char*)0,
     (const char*)0,
     (my_time_t)time(&t),
@@ -280,8 +288,8 @@ RETURN VALUE
 1                    failure (cannot happen)
 */
 int audit_table_notify(MYSQL_THD thd ,
-             unsigned int event_class,
-             const void *event)
+                       unsigned int event_class,
+                       const void *event)
 {
   char op_str[FN_LEN]={0};
   struct mysql_event_general *my_event_gen=NULL;
@@ -291,6 +299,7 @@ int audit_table_notify(MYSQL_THD thd ,
   my_bool need_rnd_end=FALSE;
   Open_tables_backup open_tables_backup;
   ulonglong save_thd_options;
+  int flag = 1;
 
   uint flags= ( MYSQL_OPEN_IGNORE_GLOBAL_READ_LOCK |
     MYSQL_LOCK_IGNORE_GLOBAL_READ_ONLY |
@@ -328,13 +337,18 @@ int audit_table_notify(MYSQL_THD thd ,
   thd->utime_after_lock= save_utime_after_lock;
 
   if (!table)
+  {
+    flag = -1;
     goto err;
-
+  }
   need_close= TRUE;
 
   if (table->file->extra(HA_EXTRA_MARK_AS_LOG_TABLE) ||
     table->file->ha_rnd_init(0))
+  {
+    flag = -1;
     goto err;
+  }
 
   need_rnd_end= TRUE;
 
@@ -342,7 +356,10 @@ int audit_table_notify(MYSQL_THD thd ,
   table->next_number_field= table->found_next_number_field;
   /* check that all columns exist */
   if (table->s->fields < 13)
+  {
+    flag = -1;
     goto err;
+  }
 
   if (event_class == MYSQL_AUDIT_GENERAL_CLASS)
   {
@@ -350,14 +367,15 @@ int audit_table_notify(MYSQL_THD thd ,
     /*The current status is vaild. The event parameters and the user and the object must be auditted.*/
     if( my_event_gen->general_command && my_event_gen->general_command != EMPTY_KEY &&
       my_event_gen->general_query && my_event_gen->general_query != EMPTY_KEY &&
-      !my_event_gen->general_error_code &&
-      check_object(audit_users,thd->main_security_ctx.user) )
+      !my_event_gen->general_error_code && check_users(thd) && 
+      (check_databases(thd) || check_tables(thd)))
     {
       prepare_general_ops(my_event_gen,op_str);
       if (strlen(op_str)!=0)
       {
         /*Call the audit_general function to write the operation into the file*/
         audit_general(thd,my_event_gen,op_str);
+        flag = 0;
       }   
     }         
   }
@@ -367,9 +385,10 @@ int audit_table_notify(MYSQL_THD thd ,
     my_event_con =  (struct mysql_event_connection *)event;
     if (!my_event_con->status)
     {
-      if(!check_object(audit_users,thd->main_security_ctx.user))
+      if(!check_users(thd))
       {
         DBUG_PRINT("info",("The user:%s is invalid.",thd->main_security_ctx.user));
+        flag = -1;
         goto err;
       }
       prepare_connect_ops(my_event_con,op_str);
@@ -378,6 +397,7 @@ int audit_table_notify(MYSQL_THD thd ,
       {
         /*Call the audit_general function to write the operation into the file*/
         audit_connect(thd,my_event_con,op_str);
+        flag = 0;
       }         
     }
   }
@@ -394,7 +414,7 @@ err:
   }
   thd->variables.option_bits= save_thd_options;
   thd->time_zone_used= save_time_zone_used;
-  DBUG_RETURN(0);
+  DBUG_RETURN(flag);
 }
 
 

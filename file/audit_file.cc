@@ -76,14 +76,16 @@ static void audit_general(MYSQL_THD thd,mysql_event_general* event,char* op_str)
   char* query;
   char audit_datetime[DATE_LEN] = {0};
   char execute_datetime[DATE_LEN] = {0};
+  char dbs_buf[BUF_LEN] = {0};
   DBUG_ENTER("audit_general");    
-  fprintf(audit_fp,"[%s] [%s] error_code:[%d] # thread_id:[%lu] # user:[%s] # query:[%s] # charset:[%s] # event_time:[%s] # rows:[%lu]\n",
+  fprintf(audit_fp,"[%s] [%s] error_code:[%d] # thread_id:[%lu] # user:[%s] # databases:[%s] # query:[%s] # charset:[%s] # event_time:[%s] # rows:[%lu]\n",
     get_current_datetime(audit_datetime),
     op_str? op_str: event->general_command,
     event->general_error_code? event->general_error_code:0,
     event->general_thread_id? event->general_thread_id:(unsigned long)0,
-    event->general_user? event->general_user:(thd->main_security_ctx.user? thd->main_security_ctx.user:"NULL"), 
-    (query = erase_password(thd,op_str,event->general_query))? query:"NULL",
+    event->general_user? event->general_user:(thd->main_security_ctx.user? thd->main_security_ctx.user:"NULL"),
+    databases_to_string(thd,dbs_buf),
+    (query = erase_password(thd,op_str,event->general_query)),
     event->general_charset? event->general_charset->name:"NULL",
     convert_longlong_to_datetime(event->general_time? event->general_time:(unsigned long long)0,execute_datetime),
     event->general_rows? event->general_rows:(unsigned long long)0);    
@@ -143,7 +145,7 @@ int init_audit_file()
     filename = make_audit_file_name(opt_audit_dir,get_current_date(audit_date),opt_audit_file,opt_audit_file_size);
     if (!my_stat(filename,&stat_info,MYF(0)))
       break;
-    if (opt_audit_file_size && stat_info.st_size > opt_audit_file_size)
+    if (opt_audit_file_size && (ulonglong)stat_info.st_size > opt_audit_file_size)
       file_id++;
     else
       break;
@@ -194,20 +196,21 @@ RETURN VALUE
 1                    failure (cannot happen)
 */
 int audit_file_notify(MYSQL_THD thd ,
-            unsigned int event_class,
-            const void *event)
+                      unsigned int event_class,
+                      const void *event)
 {
   char op_str[FN_LEN]={0};
   char current_date[DATE_LEN]={0};
   MY_STAT stat_info;
+  int flag = 1;
   struct mysql_event_general *my_event_gen=NULL;
   struct mysql_event_connection *my_event_con=NULL;
   DBUG_ENTER("audit_file_notify");
-  if(!opt_audit_ops || !audit_users->elements)
+  if(!opt_audit_ops || !audit_users->elements || !audit_dbs->elements || !audit_tables->elements)
   {
     DBUG_PRINT("error",("The value of opt_audit_ops is: %lu or the audit_users elements is %lu",
       opt_audit_ops,audit_users->elements));
-    DBUG_RETURN(1);
+    DBUG_RETURN(-1);
   }
   /* The current date is old, initialize the new audit file. */
   if(strncmp(get_current_date(current_date),audit_date,DATE_LEN))
@@ -221,10 +224,10 @@ int audit_file_notify(MYSQL_THD thd ,
   {
     DBUG_PRINT("error",("Get the status of file: %s failed.",
       audit_file_name));
-    DBUG_RETURN(1);
+    DBUG_RETURN(-1);
   }
   /* If the current file is bigger than the given restrict size, then create a new file.*/
-  if (opt_audit_file_size && stat_info.st_size > opt_audit_file_size)
+  if (opt_audit_file_size && (ulonglong)stat_info.st_size > opt_audit_file_size)
   { 
     file_id++;
     deinit_audit_file();
@@ -239,13 +242,16 @@ int audit_file_notify(MYSQL_THD thd ,
     if( my_event_gen->general_command && my_event_gen->general_command != EMPTY_KEY &&
       my_event_gen->general_query && my_event_gen->general_query != EMPTY_KEY &&
       !my_event_gen->general_error_code &&
-      check_object(audit_users,thd->main_security_ctx.user) )
+      check_users(thd) &&
+      (check_databases(thd) ||
+      check_tables(thd)))
     {
       prepare_general_ops(my_event_gen,op_str);
       if (strlen(op_str)!=0)
       {
         /*Call the audit_general function to write the operation into the file*/
         audit_general(thd,my_event_gen,op_str);
+        flag = 0;
       }  
     }         
   }
@@ -255,19 +261,20 @@ int audit_file_notify(MYSQL_THD thd ,
     my_event_con =  (struct mysql_event_connection *)event;
     if (!my_event_con->status)
     {
-      if(!check_object(audit_users,thd->main_security_ctx.user))
+      if(!check_users(thd))
       {
         DBUG_PRINT("info",("The user:%s is invalid.",thd->main_security_ctx.user));
-        DBUG_RETURN(0);
+        DBUG_RETURN(1);
       }
       prepare_connect_ops(my_event_con,op_str);
       if (strlen(op_str)!=0)
       {
         /*Call the audit_general function to write the operation into the file*/
         audit_connect(thd,my_event_con,op_str);
+        flag = 0;
       }  
     }
   } 
-  DBUG_RETURN(0);
+  DBUG_RETURN(flag);
 }
 

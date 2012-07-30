@@ -8,6 +8,7 @@ CREATE TABLE mysql.audit (
   `proxy_user` varchar(20) NOT NULL DEFAULT 'NULL',
   `host` varchar(20) NOT NULL DEFAULT 'NULL',
   `ip` varchar(20) NOT NULL DEFAULT 'NULL',
+  `dbs` varchar(255) NOT NULL DEFAULT 'NULL',
   `query` varchar(255) NOT NULL DEFAULT 'NULL',
   `charset` varchar(20) NOT NULL DEFAULT 'NULL',
   `event_time` timestamp NOT NULL DEFAULT '0000-00-00 00:00:00',

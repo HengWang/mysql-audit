@@ -131,15 +131,15 @@ int parse_config_file(const char *conf_file, cb_init_config_vars init_handler)
 
       strmake(curr_gr, ptr, min((size_t) (end-ptr)+1, sizeof(curr_gr)-1));      
 
-	   /*Callback the init_handler to process the group options. */
+      /*Callback the init_handler to process the group options. */
       if(init_handler(curr_gr,NULL,curr_gr))
       {
         found_group = 0;
         continue;
       }
-	   continue;
+      continue;
     }
-   
+
     if (!found_group)
     {
       DBUG_PRINT("warning",("warning: Found option without preceding group in config file: %s at line: %lu\n",

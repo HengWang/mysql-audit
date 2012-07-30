@@ -49,7 +49,7 @@ to contact me king_wangheng@163.com.
 #define KB_SIZE                                (1024)
 
 /* The command number. */
-#define CMD_NUM                            57
+#define CMD_NUM                            60
 
 /* The password column. */
 #define PWD_COLUMN 3
@@ -59,7 +59,7 @@ to contact me king_wangheng@163.com.
 */
 typedef enum enum_audit_variables{
   VAR_DIR,VAR_FILE,VAR_FILE_SIZE,VAR_USERS,VAR_DBS,
-  VAR_TABLES,VAR_CLASS,VAR_OPS,VAR_ALL,VAR_FULL,
+  VAR_TABLES,VAR_IGNORE_USERS,VAR_IGNORE_DBS,VAR_IGNORE_TABLES,VAR_CLASS,VAR_OPS,VAR_ALL,VAR_FULL,
   VAR_CMD,VAR_CREATE,VAR_DROP,VAR_ALTER,VAR_DDL,
   VAR_INSERT,VAR_DELETE,VAR_UPDATE,VAR_REPLACE,VAR_MODIFY,VAR_SELECT,
   VAR_DML,VAR_GRANT,VAR_REVOKE,VAR_DCL,VAR_SET,VAR_CONNECT,
@@ -74,7 +74,7 @@ typedef enum enum_audit_variables{
   * The default options command.
   */
   const char * default_options[CMD_NUM] = {"audit_dir","audit_file","audit_file_size","audit_users","audit_dbs",
-    "audit_tables","audit_class","audit_ops","audit_all","audit_full",
+    "audit_tables","ignore_users","ignore_dbs","ignore_tables","audit_class","audit_ops","audit_all","audit_full",
     "audit_cmd","audit_create","audit_drop","audit_alter","audit_ddl",
     "audit_insert","audit_delete","audit_update","audit_replace","audit_modify","audit_select",
     "audit_dml","audit_grant","audit_revoke","audit_dcl","audit_set","audit_connect",
@@ -141,6 +141,12 @@ typedef enum enum_audit_variables{
   DYNAMIC_ARRAY* audit_users;
   DYNAMIC_ARRAY* audit_dbs;
   DYNAMIC_ARRAY* audit_tables;
+  /**
+  * The audit ignore the users dbs and tables storage structure declaration
+  */
+  DYNAMIC_ARRAY* ignore_users;
+  DYNAMIC_ARRAY* ignore_dbs;
+  DYNAMIC_ARRAY* ignore_tables;
 
   /* The stat decriptor of configure file*/
   MY_STAT config_stat;
@@ -155,7 +161,10 @@ typedef enum enum_audit_variables{
   char *opt_audit_users = 0;
   char *opt_audit_dbs = 0;
   char *opt_audit_tables = 0;
-
+  char *opt_ignore_users = 0;
+  char *opt_ignore_dbs = 0;
+  char *opt_ignore_tables = 0;
+  
   char *opt_audit_dir = 0;
   char *opt_audit_file = 0;
   char default_audit_dir[FN_REFLEN];
@@ -218,7 +227,7 @@ typedef enum enum_audit_variables{
     {
       strmake(op_str, AUDIT_UPDATE_NAME.str,AUDIT_UPDATE_NAME.length);
     }
-	 /*The replace operation*/
+    /*The replace operation*/
     else if((opt_audit_ops & AUDIT_REPLACE) &&     
       !strncasecmp(my_event_gen->general_query,AUDIT_REPLACE_NAME.str,AUDIT_REPLACE_NAME.length))
     {
@@ -242,7 +251,7 @@ typedef enum enum_audit_variables{
     {
       strmake(op_str, AUDIT_REVOKE_NAME.str, AUDIT_REVOKE_NAME.length);
     }
-	 /*The set operation*/
+    /*The set operation*/
     else if((opt_audit_ops & AUDIT_SET) &&     
       !strncasecmp(my_event_gen->general_query,AUDIT_SET_NAME.str,AUDIT_SET_NAME.length))
     {
@@ -485,6 +494,7 @@ typedef enum enum_audit_variables{
     char* pre,* post;
     char *token_key, *last_key, *token_value,*last_value;
     char* local_query;
+    TABLE_LIST* table_list;
     int num=0;
     DBUG_ENTER("erase_password");
     local_query = (char*)strdup(query);
@@ -492,14 +502,8 @@ typedef enum enum_audit_variables{
     {
       DBUG_PRINT("error",("Duplicating the query string failed!"));
       DBUG_RETURN(NullS);
-    }
+    }   
 
-    if(strncasecmp(op_str,AUDIT_INSERT_NAME.str,AUDIT_INSERT_NAME.length) && 
-		strncasecmp(op_str,AUDIT_UPDATE_NAME.str, AUDIT_UPDATE_NAME.length) &&
-		strncasecmp(op_str,AUDIT_REPLACE_NAME.str, AUDIT_REPLACE_NAME.length) &&
-		strncasecmp(op_str,AUDIT_GRANT_NAME.str,AUDIT_GRANT_NAME.length) &&
-		strncasecmp(op_str,AUDIT_SET_NAME.str,AUDIT_SET_NAME.length))
-	  DBUG_RETURN(local_query);
     /* The following procedure process the operations of grant privileges 
     * and set the password.
     * exp: GRANT ALL ON *.* to ''@'' IDENTIFIED BY '###'
@@ -511,8 +515,20 @@ typedef enum enum_audit_variables{
       {
         erase(pos);     
       }   
-    }else 
+      DBUG_RETURN(local_query);
+    }else if(!strncasecmp(op_str,AUDIT_SET_NAME.str,AUDIT_SET_NAME.length))
     {
+      /* The following procedure process the operations of grant privileges 
+      * and set the password.
+      * exp: SET PASSWORD FOR ''@"" = PASSWORD('###');
+      */
+      pos = strstr(local_query,PASSWORD_NAME.str);
+      if (pos)
+      {
+        erase(pos);
+      }         
+      DBUG_RETURN(local_query);
+    }else{
       /* The following procedure process the operations which directly 
       * modify the data through the table of mysql.user. The examples 
       * like the exp1 and exp2.
@@ -520,29 +536,27 @@ typedef enum enum_audit_variables{
       *                 VALUES('','',PASSWORD('###')); 
       * exp2:  INSERT INTO mysql.user (Host,User,Password) 
       *                  VALUES('','',PASSWORD('###'));   
-      * exp3:  INSERT INTO mysql.user VLAUES('','','###');
-      * exp4:  UPDATE user SET Password=PASSWORD("###") where user="";
-      * exp5:  SET PASSWORD FOR ''@"" = PASSWORD('###');
+      * exp3:  INSERT INTO mysql.user VLAUES('','','###',...);
+      * exp4:  INSERT INTO user VALUES('','','###',...);
+      * exp5:  UPDATE user SET Password=PASSWORD("###") where user=""; 
       */
+      /*Check the database is mysql and the table is user or the table name is mysql.user*/
+
+      for(table_list = thd->lex->query_tables; table_list &&  
+        (strncasecmp((const char*)table_list->db,MYSQL_SCHEMA_NAME.str,MYSQL_SCHEMA_NAME.length) ||
+        strncasecmp((const char*)table_list->table_name,USER_NAME.str,USER_NAME.length));
+      table_list = table_list->next_local);  
+
+      if(!table_list)
+        DBUG_RETURN(local_query);
+
       pos = strstr(local_query,MYSQL_USER_NAME.str);
       if (!pos)
       {
         pos = strstr(local_query,USER_NAME.str);
-        if (!pos)
-        {
-          /* The format like exp5 */
-          pos = strstr(local_query,PASSWORD_NAME.str);
-          if (pos)
-          {
-            erase(pos);
-          }         
+        if(!pos)
           DBUG_RETURN(local_query);
-        }else
-          for(pos+=USER_NAME.length;pos && *pos==' ';pos++);
-        if(!thd->db || strncasecmp(thd->db,MYSQL_SCHEMA_NAME.str,MYSQL_SCHEMA_NAME.length))
-        {
-          DBUG_RETURN(local_query);
-        }       
+        for(pos+=USER_NAME.length;pos && *pos==' ';pos++);
       }else
         for(pos+=MYSQL_USER_NAME.length;pos && *pos==' ';pos++);
 
@@ -626,6 +640,9 @@ typedef enum enum_audit_variables{
     opt_audit_users = 0;
     opt_audit_dbs = 0;
     opt_audit_tables = 0;
+    opt_ignore_users = 0;
+    opt_ignore_dbs = 0;
+    opt_ignore_tables = 0;
     opt_audit_dir = 0;
     opt_audit_file = 0;
     strmake(default_audit_dir,mysql_real_data_home,FN_REFLEN);
@@ -657,7 +674,33 @@ typedef enum enum_audit_variables{
         DBUG_RETURN(1);
       }
     } 
-
+    /* Initialize the dynamic array of ignore user. */
+    if((ignore_users = (DYNAMIC_ARRAY*)my_malloc(sizeof(DYNAMIC_ARRAY), MYF(MY_WME))))
+    {
+      if(init_dynamic_array(ignore_users,FN_LEN,INIT_ALLOC_NUM,INIT_ALLOC_INC))
+      {
+        DBUG_PRINT("error",("Initalize the dynamic array of users failed."));
+        DBUG_RETURN(1);
+      }
+    }
+    /* Initialize the dynamic array of audit database. */
+    if((ignore_dbs = (DYNAMIC_ARRAY*)my_malloc(sizeof(DYNAMIC_ARRAY), MYF(MY_WME))))
+    {
+      if(init_dynamic_array(ignore_dbs,FN_LEN,INIT_ALLOC_NUM,INIT_ALLOC_INC))
+      {
+        DBUG_PRINT("error",("Initalize the dynamic array of users failed."));
+        DBUG_RETURN(1);
+      }
+    }
+    /* Initialize the dynamic array of audit tables. */
+    if((ignore_tables = (DYNAMIC_ARRAY*)my_malloc(sizeof(DYNAMIC_ARRAY), MYF(MY_WME))))
+    {
+      if(init_dynamic_array(ignore_tables,FN_LEN,INIT_ALLOC_NUM,INIT_ALLOC_INC))
+      {
+        DBUG_PRINT("error",("Initalize the dynamic array of users failed."));
+        DBUG_RETURN(1);
+      }
+    } 
     DBUG_RETURN(0);
   }
 
@@ -827,6 +870,15 @@ typedef enum enum_audit_variables{
   case VAR_TABLES:
     opt_audit_tables = strdup(value);
     break;
+  case VAR_IGNORE_USERS:
+    opt_ignore_users = strdup(value);
+    break;
+  case VAR_IGNORE_DBS:
+    opt_ignore_dbs = strdup(value);
+    break;
+  case VAR_IGNORE_TABLES:
+    opt_ignore_tables = strdup(value);
+    break;
   case VAR_CLASS:
     opt_audit_class = convert_audit_class(value);
     break;
@@ -835,297 +887,322 @@ typedef enum enum_audit_variables{
     break;
   case VAR_ALL:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_ALL;
-  else
+      opt_audit_ops |= AUDIT_ALL;
+    else
       opt_audit_ops &= ~AUDIT_ALL;
     break;
   case VAR_FULL:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_FULL;
-  else
-    opt_audit_ops &= ~AUDIT_FULL;
+      opt_audit_ops |= AUDIT_FULL;
+    else
+      opt_audit_ops &= ~AUDIT_FULL;
     break;
   case VAR_CMD:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CMD;
-  else
-    opt_audit_ops &= ~AUDIT_CMD;
+      opt_audit_ops |= AUDIT_CMD;
+    else
+      opt_audit_ops &= ~AUDIT_CMD;
     break;
   case VAR_CREATE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CREATE;
-  else
-    opt_audit_ops &= ~AUDIT_CREATE;
+      opt_audit_ops |= AUDIT_CREATE;
+    else
+      opt_audit_ops &= ~AUDIT_CREATE;
     break;
   case VAR_DROP:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DROP;
-  else
+      opt_audit_ops |= AUDIT_DROP;
+    else
       opt_audit_ops &= ~AUDIT_DROP;
     break;
   case VAR_ALTER:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_ALTER;
-  else
+      opt_audit_ops |= AUDIT_ALTER;
+    else
       opt_audit_ops &= ~AUDIT_ALTER;
     break;
   case VAR_DDL:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DDL;
-  else
-    opt_audit_ops &= ~AUDIT_DDL;
+      opt_audit_ops |= AUDIT_DDL;
+    else
+      opt_audit_ops &= ~AUDIT_DDL;
     break;
   case VAR_INSERT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_INSERT;
-  else
-    opt_audit_ops &= ~AUDIT_INSERT;
+      opt_audit_ops |= AUDIT_INSERT;
+    else
+      opt_audit_ops &= ~AUDIT_INSERT;
     break;
   case VAR_DELETE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DELETE;
-  else
-    opt_audit_ops &= ~AUDIT_DELETE;
+      opt_audit_ops |= AUDIT_DELETE;
+    else
+      opt_audit_ops &= ~AUDIT_DELETE;
     break;
   case VAR_UPDATE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_UPDATE;
-  else
-    opt_audit_ops &= ~AUDIT_UPDATE;
+      opt_audit_ops |= AUDIT_UPDATE;
+    else
+      opt_audit_ops &= ~AUDIT_UPDATE;
     break;
   case VAR_REPLACE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_REPLACE;
-  else
-    opt_audit_ops &= ~AUDIT_REPLACE;
+      opt_audit_ops |= AUDIT_REPLACE;
+    else
+      opt_audit_ops &= ~AUDIT_REPLACE;
     break;
   case VAR_MODIFY:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_MODIFY;
-  else
-    opt_audit_ops &= ~AUDIT_MODIFY;
+      opt_audit_ops |= AUDIT_MODIFY;
+    else
+      opt_audit_ops &= ~AUDIT_MODIFY;
     break;
   case VAR_SELECT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SELECT;
-  else
-    opt_audit_ops &= ~AUDIT_SELECT;
+      opt_audit_ops |= AUDIT_SELECT;
+    else
+      opt_audit_ops &= ~AUDIT_SELECT;
     break;
   case VAR_DML:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DML;
-  else
-    opt_audit_ops &= ~AUDIT_DML;
+      opt_audit_ops |= AUDIT_DML;
+    else
+      opt_audit_ops &= ~AUDIT_DML;
     break;
   case VAR_GRANT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_GRANT;
-  else
-    opt_audit_ops &= ~AUDIT_GRANT;
+      opt_audit_ops |= AUDIT_GRANT;
+    else
+      opt_audit_ops &= ~AUDIT_GRANT;
     break;
   case VAR_REVOKE:
     if(convert_char_bool(value))
-    opt_audit_ops |=AUDIT_REVOKE;
-  else
-    opt_audit_ops &= ~AUDIT_REVOKE;
+      opt_audit_ops |=AUDIT_REVOKE;
+    else
+      opt_audit_ops &= ~AUDIT_REVOKE;
     break;
   case VAR_DCL:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DCL;
-  else
-    opt_audit_ops &= ~AUDIT_DCL;
+      opt_audit_ops |= AUDIT_DCL;
+    else
+      opt_audit_ops &= ~AUDIT_DCL;
     break;
   case VAR_SET:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SET;
-  else
-    opt_audit_ops &= ~AUDIT_SET;
+      opt_audit_ops |= AUDIT_SET;
+    else
+      opt_audit_ops &= ~AUDIT_SET;
     break;
   case VAR_CONNECT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CONNECT;
-  else
-    opt_audit_ops &= ~AUDIT_CONNECT;
+      opt_audit_ops |= AUDIT_CONNECT;
+    else
+      opt_audit_ops &= ~AUDIT_CONNECT;
     break;
   case VAR_QUIT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_QUIT;
-  else
-    opt_audit_ops &= ~AUDIT_QUIT;
+      opt_audit_ops |= AUDIT_QUIT;
+    else
+      opt_audit_ops &= ~AUDIT_QUIT;
     break;
   case VAR_CHANGE_USER:
     if(convert_char_bool(value))
-    opt_audit_ops |=AUDIT_CHANGE_USER;
-  else
-    opt_audit_ops &= ~AUDIT_CHANGE_USER;
+      opt_audit_ops |=AUDIT_CHANGE_USER;
+    else
+      opt_audit_ops &= ~AUDIT_CHANGE_USER;
     break;
   case VAR_CONNECTION:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CONNECTION;
-  else
-    opt_audit_ops &= ~AUDIT_CONNECTION;
+      opt_audit_ops |= AUDIT_CONNECTION;
+    else
+      opt_audit_ops &= ~AUDIT_CONNECTION;
     break;
   case VAR_SERVER:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SERVER;
-  else
-    opt_audit_ops &= ~AUDIT_SERVER;
+      opt_audit_ops |= AUDIT_SERVER;
+    else
+      opt_audit_ops &= ~AUDIT_SERVER;
     break;
   case VAR_SLEEP:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SLEEP;
-  else
-    opt_audit_ops &= ~AUDIT_SLEEP;
+      opt_audit_ops |= AUDIT_SLEEP;
+    else
+      opt_audit_ops &= ~AUDIT_SLEEP;
     break;
   case VAR_INIT_DB:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_INIT_DB;
-  else
-    opt_audit_ops &= ~AUDIT_INIT_DB;
+      opt_audit_ops |= AUDIT_INIT_DB;
+    else
+      opt_audit_ops &= ~AUDIT_INIT_DB;
     break;
   case VAR_FIELD_LIST:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_FIELD_LIST;
-  else
-    opt_audit_ops &= ~AUDIT_FIELD_LIST;
+      opt_audit_ops |= AUDIT_FIELD_LIST;
+    else
+      opt_audit_ops &= ~AUDIT_FIELD_LIST;
     break;
   case VAR_REFRESH:
-  if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_REFRESH;
-  else
-    opt_audit_ops &= ~AUDIT_REFRESH;
-  break;
+    if(convert_char_bool(value))
+      opt_audit_ops |= AUDIT_REFRESH;
+    else
+      opt_audit_ops &= ~AUDIT_REFRESH;
+    break;
   case VAR_SHUTDOWN:
-  if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SHUTDOWN;
-  else
-    opt_audit_ops &= ~AUDIT_SHUTDOWN;
+    if(convert_char_bool(value))
+      opt_audit_ops |= AUDIT_SHUTDOWN;
+    else
+      opt_audit_ops &= ~AUDIT_SHUTDOWN;
     break;
   case VAR_STATISTICS:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_STATISTICS;
-  else
-    opt_audit_ops &= ~AUDIT_STATISTICS;
+      opt_audit_ops |= AUDIT_STATISTICS;
+    else
+      opt_audit_ops &= ~AUDIT_STATISTICS;
     break;
   case VAR_PROCESSLIST:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_PROCESSLIST;
-  else
-    opt_audit_ops &= ~AUDIT_PROCESSLIST;
+      opt_audit_ops |= AUDIT_PROCESSLIST;
+    else
+      opt_audit_ops &= ~AUDIT_PROCESSLIST;
     break;
   case VAR_KILL:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_KILL;
-  else
-    opt_audit_ops &= ~AUDIT_KILL;
+      opt_audit_ops |= AUDIT_KILL;
+    else
+      opt_audit_ops &= ~AUDIT_KILL;
     break;
   case VAR_DEBUG:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DEBUG;
-  else
-    opt_audit_ops &= ~AUDIT_DEBUG;
+      opt_audit_ops |= AUDIT_DEBUG;
+    else
+      opt_audit_ops &= ~AUDIT_DEBUG;
     break;
   case VAR_PING:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_PING;
-  else
-    opt_audit_ops &= ~AUDIT_PING;
+      opt_audit_ops |= AUDIT_PING;
+    else
+      opt_audit_ops &= ~AUDIT_PING;
     break;
   case VAR_TIME:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_TIME;
-  else
-    opt_audit_ops &= ~AUDIT_TIME;
+      opt_audit_ops |= AUDIT_TIME;
+    else
+      opt_audit_ops &= ~AUDIT_TIME;
     break;
   case VAR_DELAY_INSERT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DELAY_INSERT;
-  else
-    opt_audit_ops &= ~AUDIT_DELAY_INSERT;
+      opt_audit_ops |= AUDIT_DELAY_INSERT;
+    else
+      opt_audit_ops &= ~AUDIT_DELAY_INSERT;
     break;
   case VAR_BINLOG_DUMP:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_BINLOG_DUMP;
-  else
-    opt_audit_ops &= ~AUDIT_BINLOG_DUMP;
+      opt_audit_ops |= AUDIT_BINLOG_DUMP;
+    else
+      opt_audit_ops &= ~AUDIT_BINLOG_DUMP;
     break;
   case VAR_TABLE_DUMP:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_TABLE_DUMP;
-  else
-    opt_audit_ops &= ~AUDIT_TABLE_DUMP;
+      opt_audit_ops |= AUDIT_TABLE_DUMP;
+    else
+      opt_audit_ops &= ~AUDIT_TABLE_DUMP;
     break;
   case VAR_CONNECT_OUT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CONNECT_OUT;
-  else
-    opt_audit_ops &= ~AUDIT_CONNECT_OUT;
+      opt_audit_ops |= AUDIT_CONNECT_OUT;
+    else
+      opt_audit_ops &= ~AUDIT_CONNECT_OUT;
     break;
   case VAR_REGISTER_SLAVE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_REGISTER_SLAVE;
-  else
-    opt_audit_ops &= ~AUDIT_REGISTER_SLAVE;
+      opt_audit_ops |= AUDIT_REGISTER_SLAVE;
+    else
+      opt_audit_ops &= ~AUDIT_REGISTER_SLAVE;
     break;
   case VAR_PREPARE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_PREPARE;
-  else
-    opt_audit_ops &= ~AUDIT_PREPARE;
+      opt_audit_ops |= AUDIT_PREPARE;
+    else
+      opt_audit_ops &= ~AUDIT_PREPARE;
     break;
   case VAR_EXECUTE:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_EXECUTE;
-  else
-    opt_audit_ops &= ~AUDIT_EXECUTE;
+      opt_audit_ops |= AUDIT_EXECUTE;
+    else
+      opt_audit_ops &= ~AUDIT_EXECUTE;
     break;
   case VAR_LONG_DATA:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_LONG_DATA;
-  else
-    opt_audit_ops &= ~AUDIT_LONG_DATA;
+      opt_audit_ops |= AUDIT_LONG_DATA;
+    else
+      opt_audit_ops &= ~AUDIT_LONG_DATA;
     break;
   case VAR_CLOSE_STMT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_CLOSE_STMT;
-  else
-    opt_audit_ops &= ~AUDIT_CLOSE_STMT;
+      opt_audit_ops |= AUDIT_CLOSE_STMT;
+    else
+      opt_audit_ops &= ~AUDIT_CLOSE_STMT;
     break;
   case VAR_RESET_STMT:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_RESET_STMT;
-  else
-    opt_audit_ops &= ~AUDIT_RESET_STMT;
+      opt_audit_ops |= AUDIT_RESET_STMT;
+    else
+      opt_audit_ops &= ~AUDIT_RESET_STMT;
     break;
   case VAR_SET_OPTION:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_SET_OPTION;
-  else
-    opt_audit_ops &= ~AUDIT_SET_OPTION;
+      opt_audit_ops |= AUDIT_SET_OPTION;
+    else
+      opt_audit_ops &= ~AUDIT_SET_OPTION;
     break;
   case VAR_FETCH:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_FETCH;
-  else
-    opt_audit_ops &= ~AUDIT_FETCH;
+      opt_audit_ops |= AUDIT_FETCH;
+    else
+      opt_audit_ops &= ~AUDIT_FETCH;
     break;
   case VAR_DAEMON:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_DAEMON;
-  else
-    opt_audit_ops &= ~AUDIT_DAEMON;
+      opt_audit_ops |= AUDIT_DAEMON;
+    else
+      opt_audit_ops &= ~AUDIT_DAEMON;
     break;
   case VAR_ERROR:
     if(convert_char_bool(value))
-    opt_audit_ops |= AUDIT_ERROR;
-  else
-    opt_audit_ops &= ~AUDIT_ERROR;
+      opt_audit_ops |= AUDIT_ERROR;
+    else
+      opt_audit_ops &= ~AUDIT_ERROR;
     break;
   default:
     break;
     } 
     DBUG_RETURN(0);
   }
+  /*
+  Convert the databases of current query used into string.
+
+  SYNOPSIS
+  databases_to_string()
+  thd                    The MYSQL_THD.
+  dbs_buf            The string buffer.
+
+  RETURN VALUE
+  The point of dbs_buf.
+  */
+char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
+{
+  TABLE_LIST* table_list;
+  char* pos = dbs_buf;
+  DBUG_ENTER("databases_to_string");
+  for(table_list = thd->lex->query_tables;
+    table_list && table_list->db; table_list = table_list->next_local)
+  {
+    snprintf(pos, BUF_LEN, "%s,",table_list->db);
+    pos +=strlen(dbs_buf);
+  }
+  *(--pos)='\0';
+  DBUG_RETURN(dbs_buf);
+}
 
   /*
   Check the object whether in the Dynamic array or not.
@@ -1139,20 +1216,156 @@ typedef enum enum_audit_variables{
   TRUE                    success
   FALSE                   failure 
   */
-  my_bool check_object(DYNAMIC_ARRAY* array, const char* object)
+  static my_bool check_object(DYNAMIC_ARRAY* array, const char* object)
   {
     uint idx=0;
     char element[FN_LEN]={0};
-    for (;idx < array->elements;idx++)
+    for (idx = 0;idx < array->elements;idx++)
     {
       get_dynamic(array,(uchar*)element,idx);
-      if (!strncasecmp((const char*)element,KEY_ALL,strlen(KEY_ALL)) || !strncasecmp((const char*)element,object,strlen(element)))
+      if (!strncasecmp((const char*)element,KEY_ALL,strlen(KEY_ALL)) || 
+        !strncasecmp((const char*)element,object,strlen(element)))
       {
         return TRUE;
       }   
     }
     return FALSE;
   }
+
+  /*
+  Check the user whether in the Dynamic array or not.
+
+  SYNOPSIS
+  check_users()
+  users              The the dynamic array.
+  user                The user for check.
+
+  RETURN VALUE
+  TRUE                    success
+  FALSE                   failure 
+  */
+  my_bool check_users(MYSQL_THD thd)
+  {
+    
+    /**
+     * Check the query users whether in ignore users. If 
+     * the current query user in the ignore users, the return 
+     * result is FALSE, then the operation will not be audited.
+     */
+    if(check_object(ignore_users,thd->main_security_ctx.user))
+      return FALSE;
+    /**
+     * Check the current query user whether in audit users
+     * or not. 
+     */
+    return check_object(audit_users,thd->main_security_ctx.user);
+  }
+
+  /*
+  Check the user whether in the Dynamic array or not.
+
+  SYNOPSIS
+  check_databases()
+  users              The the dynamic array.
+  user                The user for check.
+
+  RETURN VALUE
+  TRUE                    success
+  FALSE                   failure 
+  */
+  my_bool check_databases(MYSQL_THD thd)
+  {
+    TABLE_LIST* table_list;
+    my_bool flag = FALSE;
+    for(table_list = thd->lex->query_tables;
+      table_list; table_list = table_list->next_local)
+    {
+      /**
+      * Check the query databases whether in ignore databases. If 
+      * the current query database in the ignore databases, the return 
+      * result is FALSE, then the operation will not be audited.
+      */
+      if(check_object(ignore_dbs,table_list->db))
+        return FALSE;
+      /**
+      * Check the current query database whether in audit databases
+      * or not. If the query database has been in the audit database,
+      * will not be continued to check the database. Or check the 
+      * database whether in audit databases.
+      */
+      if(!flag && check_object(audit_dbs,table_list->db))
+        flag = TRUE;
+    }
+    return flag;
+  }
+
+  /*
+  Check the user whether in the Dynamic array or not.
+
+  SYNOPSIS
+  check_tables()
+  users              The the dynamic array.
+  user                The user for check.
+
+  RETURN VALUE
+  TRUE                    success
+  FALSE                   failure 
+  */
+  my_bool check_tables(MYSQL_THD thd)
+  {
+    TABLE_LIST* table_list;
+    uint idx=0;
+    char element[FN_LEN]={0};
+    char* pos;
+    size_t db_len=0,tbl_len=0;
+    /**
+     * Check the used table whether in ignore tables or not. If the 
+     * current query table in the ignore tables, the return result is 
+     * FALSE, then operation will not be audited. Or, check the 
+     * query tables whether in audit tables or not.
+     */
+    for (idx = 0;idx < ignore_tables->elements;idx++)
+    {
+      get_dynamic(ignore_tables,(uchar*)element,idx);
+      pos = strstr(element,".");
+      if(!pos)
+        break;
+      db_len = pos - element;
+      pos++;
+      tbl_len = strlen(element)-db_len-1;
+      for(table_list = thd->lex->query_tables; table_list; table_list = table_list->next_local)
+      {
+        if ((!strncasecmp((const char*)element,KEY_ALL,max(db_len,strlen(KEY_ALL))) || 
+          !strncasecmp((const char*)element,table_list->db,max(db_len,strlen(table_list->db))))&&
+          (!strncasecmp((const char*)pos,KEY_ALL,max(tbl_len,strlen(KEY_ALL))) || 
+          !strncasecmp((const char*)pos, table_list->table_name,max(tbl_len,strlen(table_list->table_name)))))
+          return FALSE;        
+      }
+    }
+    /**
+     *Check the used tables whether in audit tables or not.
+     */
+    for (idx = 0;idx < audit_tables->elements;idx++)
+    {
+      get_dynamic(audit_tables,(uchar*)element,idx);
+      pos = strstr(element,".");
+      if(!pos)
+        return FALSE;
+      db_len = pos - element;
+      pos++;
+      tbl_len = strlen(element)-db_len-1;
+      for(table_list = thd->lex->query_tables; table_list; table_list = table_list->next_local)
+      {
+        if ((!strncasecmp((const char*)element,KEY_ALL,max(db_len,strlen(KEY_ALL))) || 
+          !strncasecmp((const char*)element,table_list->db,max(db_len,strlen(table_list->db))))&&
+          (!strncasecmp((const char*)pos,KEY_ALL,max(tbl_len,strlen(KEY_ALL))) || 
+          !strncasecmp((const char*)pos, table_list->table_name,max(tbl_len,strlen(table_list->table_name)))))
+          return TRUE;        
+      }
+    }
+    return FALSE;
+  }
+
 
   /*
   Split the string src which separated by ',' and store the element into
@@ -1205,7 +1418,7 @@ typedef enum enum_audit_variables{
   static int audit_plugin_init(void *arg __attribute__((unused)))
   {
     DBUG_ENTER("audit_plugin_init");
-    commands=0;
+    //commands=0;
     /* Initialize the default variables. */
     if(init_default_vars())
     {
@@ -1229,6 +1442,10 @@ typedef enum enum_audit_variables{
     {
       opt_audit_file = strdup(default_audit_filename);
     } 
+    if(!opt_audit_users)
+    {
+      opt_audit_users = strdup(ALL_USERS);
+    }
     /* Split the audit users and store into the dynamic array. */
     if (opt_audit_users)
     {
@@ -1238,6 +1455,10 @@ typedef enum enum_audit_variables{
           "%s .",opt_audit_users));
         DBUG_RETURN(1);
       }
+    }
+    if(!opt_audit_dbs)
+    {
+      opt_audit_dbs = strdup(ALL_DBS);
     }
     /* Split the audit databases and store into the dynamic array. */
     if(opt_audit_dbs)
@@ -1249,6 +1470,10 @@ typedef enum enum_audit_variables{
         DBUG_RETURN(1);
       }
     }
+    if(!opt_audit_tables)
+    {
+      opt_audit_tables = strdup(ALL_TABLES);
+    }
     /* Split the audit tables and store into the dynamic array. */
     if(opt_audit_tables)
     {
@@ -1256,6 +1481,48 @@ typedef enum enum_audit_variables{
       {
         DBUG_PRINT("error",("Failed when splitting format string :"
           "%s .",opt_audit_tables));
+        DBUG_RETURN(1);
+      }
+    }
+    if(!opt_ignore_users)
+    {
+      opt_ignore_users = strdup(EMPTY_KEY);
+    }
+    /* Split the ingore users and store into the dynamic array. */
+    if(opt_ignore_users)
+    {
+      if(split_format_string(opt_ignore_users,  ignore_users))
+      {
+        DBUG_PRINT("error",("Failed when splitting format string :"
+          "%s .",opt_ignore_users));
+        DBUG_RETURN(1);
+      }
+    }
+    if(!opt_ignore_dbs)
+    {
+      opt_ignore_dbs = strdup(EMPTY_KEY);
+    }
+    /* Split the ignore databases and store into the dynamic array. */
+    if(opt_ignore_dbs)
+    {
+      if(split_format_string(opt_ignore_dbs,  ignore_dbs))
+      {
+        DBUG_PRINT("error",("Failed when splitting format string :"
+          "%s .",opt_ignore_dbs));
+        DBUG_RETURN(1);
+      }
+    }
+    if(!opt_ignore_tables)
+    {
+      opt_ignore_tables = strdup(EMPTY_KEY);
+    }
+    /* Split the ignore tables and store into the dynamic array. */
+    if(opt_ignore_tables)
+    {
+      if(split_format_string(opt_ignore_tables,  ignore_tables))
+      {
+        DBUG_PRINT("error",("Failed when splitting format string :"
+          "%s .",opt_ignore_tables));
         DBUG_RETURN(1);
       }
     }
@@ -1299,6 +1566,7 @@ typedef enum enum_audit_variables{
     if (audit_users)
     {
       delete_dynamic(audit_users);
+      my_free(audit_users);
     }
     if(opt_audit_users)
     {
@@ -1311,15 +1579,44 @@ typedef enum enum_audit_variables{
     if(audit_dbs)
     {
       delete_dynamic(audit_dbs);
+      my_free(audit_dbs);
     }
     if(opt_audit_tables)
     {
-      free(opt_audit_dbs);
+      free(opt_audit_tables);
     }
     if(audit_tables)
     {
       delete_dynamic(audit_tables);
-    }  
+      my_free(audit_tables);
+    }
+    if(opt_ignore_users)
+    {
+      free(opt_ignore_users);
+    }
+    if(ignore_users)
+    {
+      delete_dynamic(ignore_users);
+      my_free(ignore_users);
+    }
+    if(opt_ignore_dbs)
+    {
+      free(opt_ignore_dbs);
+    }
+    if(ignore_dbs)
+    {
+      delete_dynamic(ignore_dbs);
+      my_free(ignore_dbs);
+    }
+    if(opt_ignore_tables)
+    {
+      free(opt_ignore_tables);
+    }
+    if(ignore_tables)
+    {
+      delete_dynamic(ignore_tables);
+      my_free(ignore_tables);
+    }
     /* Based on the audit class, deinitialized the audit file or table.*/
     switch(opt_audit_class){
   case LOG_FILE:
