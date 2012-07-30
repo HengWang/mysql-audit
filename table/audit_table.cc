@@ -367,8 +367,7 @@ int audit_table_notify(MYSQL_THD thd ,
     /*The current status is vaild. The event parameters and the user and the object must be auditted.*/
     if( my_event_gen->general_command && my_event_gen->general_command != EMPTY_KEY &&
       my_event_gen->general_query && my_event_gen->general_query != EMPTY_KEY &&
-      !my_event_gen->general_error_code && check_users(thd) && 
-      (check_databases(thd) || check_tables(thd)))
+      !my_event_gen->general_error_code && check_users(thd) && check_objects(thd) )
     {
       prepare_general_ops(my_event_gen,op_str);
       if (strlen(op_str)!=0)

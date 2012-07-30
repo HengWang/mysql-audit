@@ -1,6 +1,28 @@
                           ChangeList
 MySQL audit plugin change list.
-						  
+		
+2012/7/30
+1. Modify the function of:
+       my_bool check_databases(MYSQL_THD thd)
+   In line 1279 of audit.cc
+   1) Change the function to static, just used in audit.cc
+   2) Add the parameter of dbs
+   3) Remove the ignore_dbs process.
+   4) Remove the declaraion of check_databases in audit.h
+2. Modify the function of:
+       my_bool check_tables(MYSQL_THD thd)
+   In line 1309 of audit.cc
+   1) Change the function to static, just used in audit.cc
+   2) Add the parameter of tables
+   3) Remove the ignore_tables process.
+   4) Remove the declaraion of check_tables in audit.h
+3. Add the function of:
+       my_bool check_objects(MYSQL_THD thd)
+   In line 1352 of audit.cc
+   1) Add the function of check_objects to process the checking operations.
+   2) Add the declaration of check_objects in audit.h.
+   
+   
 2012/7/29 
 1. Modify the function of:
        char*  erase_password(MYSQL_THD thd,char* op_str,const char* query) 

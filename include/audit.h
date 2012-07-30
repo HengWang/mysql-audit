@@ -162,8 +162,7 @@ extern char* prepare_connect_ops(struct mysql_event_connection *, char* );
 extern char* databases_to_string(MYSQL_THD, char*);
 extern char*  erase_password(MYSQL_THD, char* ,const char* );
 extern my_bool check_users(MYSQL_THD);
-extern my_bool check_databases(MYSQL_THD);
-extern my_bool check_tables(MYSQL_THD);
+extern my_bool check_objects(MYSQL_THD);
 #endif //_AUDIT_H
 
 

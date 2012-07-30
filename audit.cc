@@ -1205,26 +1205,30 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
 }
 
   /*
-  Check the object whether in the Dynamic array or not.
+  Check the item whether in the Dynamic array or not.
 
   SYNOPSIS
-  check_object()
+  check_item()
   array              The the dynamic array.
-  object            The object for check.
+  item               The item for check.
 
   RETURN VALUE
   TRUE                    success
   FALSE                   failure 
   */
-  static my_bool check_object(DYNAMIC_ARRAY* array, const char* object)
+  static my_bool check_item(DYNAMIC_ARRAY* array, const char* item)
   {
     uint idx=0;
+    uint len = 0,item_len = 0;
     char element[FN_LEN]={0};
+
+    item_len = strlen(item);
     for (idx = 0;idx < array->elements;idx++)
     {
       get_dynamic(array,(uchar*)element,idx);
-      if (!strncasecmp((const char*)element,KEY_ALL,strlen(KEY_ALL)) || 
-        !strncasecmp((const char*)element,object,strlen(element)))
+      len = strlen(element);
+      if (!strncasecmp((const char*)element,KEY_ALL,max(len,1)) || 
+        !strncasecmp((const char*)element,item,max(len,item_len)))
       {
         return TRUE;
       }   
@@ -1237,8 +1241,7 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
 
   SYNOPSIS
   check_users()
-  users              The the dynamic array.
-  user                The user for check.
+  thd                The current thd.
 
   RETURN VALUE
   TRUE                    success
@@ -1246,72 +1249,64 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
   */
   my_bool check_users(MYSQL_THD thd)
   {
-    
+    DBUG_ENTER("check_users");
     /**
      * Check the query users whether in ignore users. If 
      * the current query user in the ignore users, the return 
      * result is FALSE, then the operation will not be audited.
      */
-    if(check_object(ignore_users,thd->main_security_ctx.user))
-      return FALSE;
+    if(check_item(ignore_users,thd->main_security_ctx.user))
+      DBUG_RETURN( FALSE);
     /**
      * Check the current query user whether in audit users
      * or not. 
      */
-    return check_object(audit_users,thd->main_security_ctx.user);
+    DBUG_RETURN(check_item(audit_users,thd->main_security_ctx.user));
   }
 
   /*
-  Check the user whether in the Dynamic array or not.
+  Check the query database whether in the Dynamic array or not.
 
   SYNOPSIS
   check_databases()
-  users              The the dynamic array.
-  user                The user for check.
+  thd                  The current thd.
+  dbs                 The dynamic array for databases.
 
   RETURN VALUE
   TRUE                    success
   FALSE                   failure 
   */
-  my_bool check_databases(MYSQL_THD thd)
+  static my_bool check_databases(MYSQL_THD thd, DYNAMIC_ARRAY* dbs)
   {
     TABLE_LIST* table_list;
-    my_bool flag = FALSE;
     for(table_list = thd->lex->query_tables;
       table_list; table_list = table_list->next_local)
     {
       /**
-      * Check the query databases whether in ignore databases. If 
-      * the current query database in the ignore databases, the return 
-      * result is FALSE, then the operation will not be audited.
-      */
-      if(check_object(ignore_dbs,table_list->db))
-        return FALSE;
-      /**
-      * Check the current query database whether in audit databases
+      * Check the current query database whether in databases
       * or not. If the query database has been in the audit database,
       * will not be continued to check the database. Or check the 
       * database whether in audit databases.
       */
-      if(!flag && check_object(audit_dbs,table_list->db))
-        flag = TRUE;
+      if(check_item(dbs,table_list->db))
+        return TRUE;
     }
-    return flag;
+    return FALSE;
   }
 
   /*
-  Check the user whether in the Dynamic array or not.
+  Check the query table whether in the Dynamic array or not.
 
   SYNOPSIS
   check_tables()
-  users              The the dynamic array.
-  user                The user for check.
+  thd                  The current thd.
+  tables                 The dynamic array for tables.
 
   RETURN VALUE
   TRUE                    success
   FALSE                   failure 
   */
-  my_bool check_tables(MYSQL_THD thd)
+  static my_bool check_tables(MYSQL_THD thd, DYNAMIC_ARRAY* tables)
   {
     TABLE_LIST* table_list;
     uint idx=0;
@@ -1319,35 +1314,11 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     char* pos;
     size_t db_len=0,tbl_len=0;
     /**
-     * Check the used table whether in ignore tables or not. If the 
-     * current query table in the ignore tables, the return result is 
-     * FALSE, then operation will not be audited. Or, check the 
-     * query tables whether in audit tables or not.
+     *Check the used tables whether in tables or not.
      */
-    for (idx = 0;idx < ignore_tables->elements;idx++)
+    for (idx = 0;idx < tables->elements;idx++)
     {
-      get_dynamic(ignore_tables,(uchar*)element,idx);
-      pos = strstr(element,".");
-      if(!pos)
-        break;
-      db_len = pos - element;
-      pos++;
-      tbl_len = strlen(element)-db_len-1;
-      for(table_list = thd->lex->query_tables; table_list; table_list = table_list->next_local)
-      {
-        if ((!strncasecmp((const char*)element,KEY_ALL,max(db_len,strlen(KEY_ALL))) || 
-          !strncasecmp((const char*)element,table_list->db,max(db_len,strlen(table_list->db))))&&
-          (!strncasecmp((const char*)pos,KEY_ALL,max(tbl_len,strlen(KEY_ALL))) || 
-          !strncasecmp((const char*)pos, table_list->table_name,max(tbl_len,strlen(table_list->table_name)))))
-          return FALSE;        
-      }
-    }
-    /**
-     *Check the used tables whether in audit tables or not.
-     */
-    for (idx = 0;idx < audit_tables->elements;idx++)
-    {
-      get_dynamic(audit_tables,(uchar*)element,idx);
+      get_dynamic(tables,(uchar*)element,idx);
       pos = strstr(element,".");
       if(!pos)
         return FALSE;
@@ -1356,9 +1327,9 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
       tbl_len = strlen(element)-db_len-1;
       for(table_list = thd->lex->query_tables; table_list; table_list = table_list->next_local)
       {
-        if ((!strncasecmp((const char*)element,KEY_ALL,max(db_len,strlen(KEY_ALL))) || 
+        if ((!strncasecmp((const char*)element,KEY_ALL,max(db_len,1)) || 
           !strncasecmp((const char*)element,table_list->db,max(db_len,strlen(table_list->db))))&&
-          (!strncasecmp((const char*)pos,KEY_ALL,max(tbl_len,strlen(KEY_ALL))) || 
+          (!strncasecmp((const char*)pos,KEY_ALL,max(tbl_len,1)) || 
           !strncasecmp((const char*)pos, table_list->table_name,max(tbl_len,strlen(table_list->table_name)))))
           return TRUE;        
       }
@@ -1366,6 +1337,30 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     return FALSE;
   }
 
+  /*
+  Check the query table or database whether in the Dynamic array for auditing or not.
+
+  SYNOPSIS
+  check_objects()
+  thd                  The current thd.
+
+  RETURN VALUE
+  TRUE                    success
+  FALSE                   failure 
+  */
+  my_bool check_objects(MYSQL_THD thd)
+  {
+    DBUG_ENTER("check_objects");
+    if (check_tables(thd,ignore_tables))
+      DBUG_RETURN(FALSE);
+    if(check_tables(thd,audit_tables))
+      DBUG_RETURN( TRUE);
+    if (check_databases(thd,ignore_dbs))
+      DBUG_RETURN( FALSE);
+    if(check_databases(thd,audit_dbs))
+      DBUG_RETURN( TRUE);
+    DBUG_RETURN( FALSE);    
+  }
 
   /*
   Split the string src which separated by ',' and store the element into
