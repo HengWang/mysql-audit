@@ -127,7 +127,7 @@ extern LEX_STRING AUDIT_ERROR_NAME ;
 #define ALL_TABLES KEY_ALL "." KEY_ALL
 
 #define IGNORE_CMD    "/*!"
-#define EMPTY_KEY " "
+#define EMPTY_KEY ' '
 #define QUERY_KEY "Query"
 
 #ifndef BUF_LEN

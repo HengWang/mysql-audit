@@ -239,16 +239,29 @@ int audit_file_notify(MYSQL_THD thd ,
   {
     my_event_gen = (struct mysql_event_general *)event; 
     /*The current status is vaild. The event parameters and the user and the object must be auditted.*/
-    if( my_event_gen->general_command && my_event_gen->general_command != EMPTY_KEY &&
-      my_event_gen->general_query && my_event_gen->general_query != EMPTY_KEY &&
-      !my_event_gen->general_error_code && check_users(thd) && check_objects(thd))
+    if( my_event_gen->general_command && *my_event_gen->general_command != EMPTY_KEY &&
+      my_event_gen->general_query && *my_event_gen->general_query != EMPTY_KEY &&
+      !my_event_gen->general_error_code && check_users(thd))
     {
       prepare_general_ops(my_event_gen,op_str);
       if (strlen(op_str)!=0)
       {
-        /*Call the audit_general function to write the operation into the file*/
-        audit_general(thd,my_event_gen,op_str);
-        flag = 0;
+        if(strncasecmp(op_str,AUDIT_GRANT_NAME.str,AUDIT_GRANT_NAME.length) && 
+          strncasecmp(op_str,AUDIT_REVOKE_NAME.str,AUDIT_REVOKE_NAME.length) &&
+          strncasecmp(op_str,AUDIT_SET_NAME.str,AUDIT_SET_NAME.length))
+        {
+          if (check_objects(thd))
+          {
+            /*Call the audit_general function to write the operation into the file*/
+            audit_general(thd,my_event_gen,op_str);
+            flag = 0;
+          }
+        }else
+        {
+          /*Call the audit_general function to write the operation into the file*/
+          audit_general(thd,my_event_gen,op_str);
+          flag = 0;
+        } 
       }  
     }         
   }

@@ -1200,7 +1200,10 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     snprintf(pos, BUF_LEN, "%s,",table_list->db);
     pos +=strlen(dbs_buf);
   }
-  *(--pos)='\0';
+  if (dbs_buf != pos)
+  {
+    *(--pos)='\0';
+  }  
   DBUG_RETURN(dbs_buf);
 }
 
@@ -1481,7 +1484,7 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     }
     if(!opt_ignore_users)
     {
-      opt_ignore_users = strdup(EMPTY_KEY);
+      opt_ignore_users = strdup("");
     }
     /* Split the ingore users and store into the dynamic array. */
     if(opt_ignore_users)
@@ -1495,7 +1498,7 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     }
     if(!opt_ignore_dbs)
     {
-      opt_ignore_dbs = strdup(EMPTY_KEY);
+      opt_ignore_dbs = strdup("");
     }
     /* Split the ignore databases and store into the dynamic array. */
     if(opt_ignore_dbs)
@@ -1509,7 +1512,7 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     }
     if(!opt_ignore_tables)
     {
-      opt_ignore_tables = strdup(EMPTY_KEY);
+      opt_ignore_tables = strdup("");
     }
     /* Split the ignore tables and store into the dynamic array. */
     if(opt_ignore_tables)
