@@ -1,5 +1,20 @@
                           ChangeList
 MySQL audit plugin change list.
+
+2012/7/31
+1. Modify the function of 
+       char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
+   In line 1192 of audit.cc
+   Modify the error when query table is null, (--pos) will be memory address
+   cross-border.
+2. Modify the procedure of calling check_objects in functions of 
+   audit_file_notify() in line 198 of audit_file.cc and 
+   audit_table_notify() in line 290 of audit_table.cc.
+   
+   The function of check_objects() will be ignore when the query command is 
+   grant, revoke, set. because of that command will not use the database and
+   table explicit. 
+
 		
 2012/7/30
 1. Modify the function of:
