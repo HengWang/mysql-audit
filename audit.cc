@@ -507,6 +507,7 @@ typedef enum enum_audit_variables{
     /* The following procedure process the operations of grant privileges 
     * and set the password.
     * exp: GRANT ALL ON *.* to ''@'' IDENTIFIED BY '###'
+    * exp: GRANT ALL ON *.* to ''@'' IDENTIFIED BY PASSWORD '###'
     */
     if (!strncasecmp(op_str,AUDIT_GRANT_NAME.str,AUDIT_GRANT_NAME.length))
     {
@@ -1225,6 +1226,8 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     uint len = 0,item_len = 0;
     char element[FN_LEN]={0};
 
+    if(!array || !array->elements || !item)
+      return FALSE;
     item_len = strlen(item);
     for (idx = 0;idx < array->elements;idx++)
     {
@@ -1253,6 +1256,9 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
   my_bool check_users(MYSQL_THD thd)
   {
     DBUG_ENTER("check_users");
+    if (!thd)
+      DBUG_RETURN(FALSE);
+    
     /**
      * Check the query users whether in ignore users. If 
      * the current query user in the ignore users, the return 
@@ -1282,6 +1288,8 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
   static my_bool check_databases(MYSQL_THD thd, DYNAMIC_ARRAY* dbs)
   {
     TABLE_LIST* table_list;
+    if(!thd || !dbs || !dbs->elements)
+      return FALSE;
     for(table_list = thd->lex->query_tables;
       table_list; table_list = table_list->next_local)
     {
@@ -1316,6 +1324,9 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
     char element[FN_LEN]={0};
     char* pos;
     size_t db_len=0,tbl_len=0;
+    
+    if(!thd || !tables || !tables->elements)
+      return FALSE;
     /**
      *Check the used tables whether in tables or not.
      */
@@ -1354,6 +1365,8 @@ char* databases_to_string(MYSQL_THD thd, char* dbs_buf)
   my_bool check_objects(MYSQL_THD thd)
   {
     DBUG_ENTER("check_objects");
+    if(!thd)
+      DBUG_RETURN(FALSE);
     if (check_tables(thd,ignore_tables))
       DBUG_RETURN(FALSE);
     if(check_tables(thd,audit_tables))
